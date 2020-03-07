@@ -193,6 +193,15 @@ namespace MapleShark
             }
         }
 
+        public void TransformCIG(byte[] pData)
+        {
+            uint uIV = BitConverter.ToUInt32(mIV, 0);
+            for (int i = 0; i < pData.Length; i++)
+            {
+                pData[i] -= (byte)(uIV);
+            }
+        }
+
         public void ShiftIV(byte[] pOldIV = null)
         {
             if (pOldIV == null) pOldIV = mIV;

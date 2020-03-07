@@ -9,6 +9,7 @@ namespace MapleShark
     public enum TransformMethod : int
     {
         AES = 1 << 1,
+        CIG = 1 << 7,
         MAPLE_CRYPTO = 1 << 2,
         OLD_KMS_CRYPTO = 1 << 3,
         KMS_CRYPTO = 1 << 4,
@@ -23,6 +24,7 @@ namespace MapleShark
         private const int DEFAULT_SIZE = 4096;
 
         private bool mOutbound = false;
+        private bool mLoginSv = false;
         private MapleAES mAES = null;
         private byte[] mBuffer = new byte[DEFAULT_SIZE];
         private int mCursor = 0;
@@ -35,9 +37,10 @@ namespace MapleShark
         public ushort Build { get; private set; }
         public byte Locale { get; private set; }
 
-        public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion)
+        public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion, bool bLoginSv)
         {
             mOutbound = pOutbound;
+            mLoginSv = bLoginSv;
             Build = pBuild;
             Locale = pLocale;
 
@@ -72,6 +75,11 @@ namespace MapleShark
             {
                 // TWMS / CMS / CMST / JMS / GMS (>= 149)
                 _transformMethod = TransformMethod.AES | TransformMethod.SHIFT_IV;
+                // GMS (>= 186)
+                if (Locale == MapleLocale.GLOBAL && Build >= 186)
+                {
+                    _transformMethod |= TransformMethod.CIG;
+                }
             }
             else if (Locale == MapleLocale.KOREA || Locale == MapleLocale.KOREA_TEST)
             {
@@ -156,7 +164,9 @@ namespace MapleShark
 
         private void Decrypt(byte[] pBuffer, TransformMethod pTransformLocale)
         {
-            if ((pTransformLocale & TransformMethod.AES) != 0) mAES.TransformAES(pBuffer);
+            // CIG encryption only for Inbound packet and not from LoginServer
+            if ((pTransformLocale & TransformMethod.CIG) != 0 && !mOutbound && !mLoginSv) mAES.TransformCIG(pBuffer);
+            else if ((pTransformLocale & TransformMethod.AES) != 0) mAES.TransformAES(pBuffer);
 
             if ((pTransformLocale & TransformMethod.MAPLE_CRYPTO) != 0)
             {

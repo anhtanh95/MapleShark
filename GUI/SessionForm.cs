@@ -244,8 +244,20 @@ namespace MapleShark
                 mLocale = serverLocale;
                 mPatchLocation = patchLocation;
 
-                mOutboundStream = new MapleStream(true, mBuild, mLocale, localIV, subVersion);
-                mInboundStream = new MapleStream(false, mBuild, mLocale, remoteIV, subVersion);
+                var isLoginSv = false;
+                if (pTCPPacket.SourcePort == mLocalPort)
+                {
+                    // Outbound
+                    isLoginSv = pTCPPacket.DestinationPort == 8484;
+                } 
+                else
+                {
+                    // Inbound
+                    isLoginSv = pTCPPacket.SourcePort == 8484;
+                }
+
+                mOutboundStream = new MapleStream(true, mBuild, mLocale, localIV, subVersion, isLoginSv);
+                mInboundStream = new MapleStream(false, mBuild, mLocale, remoteIV, subVersion, isLoginSv);
 
                 // Generate HandShake packet
                 Definition definition = Config.Instance.GetDefinition(mBuild, mLocale, false, 0xFFFF);
