@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -159,6 +160,48 @@ namespace MapleShark
             _expectedDataSize = 4;
 
             Definition definition = Config.Instance.GetDefinition(Build, Locale, mOutbound, opcode);
+
+            // Detect OpcodeEncryption Packet
+            if (packetBuffer.Length == (8 + 1 + short.MaxValue)) // 32776
+            {
+                uint blockSize = (uint)(packetBuffer[0] | (packetBuffer[1] << 8) | (packetBuffer[2] << 16) | (packetBuffer[3] << 24));
+                uint bufferSize = (uint)(packetBuffer[4] | (packetBuffer[5] << 8) | (packetBuffer[6] << 16) | (packetBuffer[7] << 24));
+                if (blockSize == 4 && bufferSize == (1 + short.MaxValue))
+                {
+                    Console.WriteLine("Recv OpcodeEncryption Packet with Opcode:0x{0:X} | BlockSize:{1} | BufferSize:{2}", opcode, blockSize, bufferSize);
+                    // Generate OpcodeEncryption packet
+                    {
+                        if (definition == null)
+                        {
+                            definition = new Definition();
+                            definition.Outbound = mOutbound;
+                            definition.Locale = Locale;
+                            definition.Opcode = opcode;
+                            definition.Name = "Opcode Encryption";
+                            definition.Build = Build;
+                            DefinitionsContainer.Instance.SaveDefinition(definition);
+                        }
+
+                        var filename = Helpers.GetScriptPath(Locale, Build, mOutbound, opcode);
+                        Helpers.MakeSureFileDirectoryExists(filename);
+
+                        // Create main script
+                        if (!File.Exists(filename))
+                        {
+                            string contents = @"
+using (ScriptAPI) {
+    AddInt(""Block Size"");
+    AddInt(""Buffer Size"");
+    AddByte(""Unknown"");
+    AddField(""Buffer With Encrypted Opcodes"", 32767);
+}
+";
+                            File.WriteAllText(filename, contents);
+                        }
+                    }
+                }
+            }
+
             return new MaplePacket(pTransmitted, mOutbound, Build, Locale, opcode, definition == null ? "" : definition.Name, packetBuffer, preDecodeIV, postDecodeIV);
         }
 
