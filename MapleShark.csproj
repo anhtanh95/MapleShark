@@ -118,6 +118,8 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Packet\EncryptedOpcode.cs" />
+    <Compile Include="Packet\TripleDESCipher.cs" />
     <Compile Include="Tools\AppUpdates.cs" />
     <Compile Include="Tools\Config.cs" />
     <Compile Include="GUI\DataForm.cs">

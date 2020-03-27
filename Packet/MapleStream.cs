@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 
 namespace MapleShark
@@ -18,6 +17,12 @@ namespace MapleShark
         SHIFT_IV = 1 << 5,
         SHIFT_IV_OLD = 1 << 6,
         NONE = 0
+    }
+
+    public class OpcodeEncryptedEventArgs : EventArgs
+    {
+        public bool OpcodeEncrypted { get; set; }
+        public Dictionary<int, EncryptedOpcode> EncryptedOpcodes { get; set; }
     }
 
     public sealed class MapleStream
@@ -37,6 +42,16 @@ namespace MapleShark
 
         public ushort Build { get; private set; }
         public byte Locale { get; private set; }
+        public bool OpcodeEncrypted { get; set; }
+        public Dictionary<int, EncryptedOpcode> EncryptedOpcodes { get; set; }
+
+        // Custom event for opcode encryption
+        public event EventHandler<OpcodeEncryptedEventArgs> RecvOpcodeEncryptPacket;
+        private void OnRecvOpcodeEncryptPacket(OpcodeEncryptedEventArgs e)
+        {
+            EventHandler<OpcodeEncryptedEventArgs> handler = RecvOpcodeEncryptPacket;
+            handler?.Invoke(this, e);
+        }
 
         public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion, bool bLoginSv)
         {
@@ -159,18 +174,25 @@ namespace MapleShark
 
             _expectedDataSize = 4;
 
-            Definition definition = Config.Instance.GetDefinition(Build, Locale, mOutbound, opcode);
+            Definition definition = null;
 
             // Detect OpcodeEncryption Packet
             if (packetBuffer.Length == (8 + 1 + short.MaxValue)) // 32776
             {
-                uint blockSize = (uint)(packetBuffer[0] | (packetBuffer[1] << 8) | (packetBuffer[2] << 16) | (packetBuffer[3] << 24));
-                uint bufferSize = (uint)(packetBuffer[4] | (packetBuffer[5] << 8) | (packetBuffer[6] << 16) | (packetBuffer[7] << 24));
+                int blockSize = BitConverter.ToInt32(packetBuffer, 0);
+                int bufferSize = BitConverter.ToInt32(packetBuffer, 4);
                 if (blockSize == 4 && bufferSize == (1 + short.MaxValue))
                 {
                     Console.WriteLine("Recv OpcodeEncryption Packet with Opcode:0x{0:X} | BlockSize:{1} | BufferSize:{2}", opcode, blockSize, bufferSize);
+
+                    OpcodeEncryptedEventArgs recvOpcodeEventArgs = new OpcodeEncryptedEventArgs();
+                    recvOpcodeEventArgs.OpcodeEncrypted = true;
+                    recvOpcodeEventArgs.EncryptedOpcodes = PopulateEncryptedOpcode(packetBuffer, bufferSize);
+                    OnRecvOpcodeEncryptPacket(recvOpcodeEventArgs);
+
                     // Generate OpcodeEncryption packet
                     {
+                        definition = Config.Instance.GetDefinition(Build, Locale, mOutbound, opcode);
                         if (definition == null)
                         {
                             definition = new Definition();
@@ -202,6 +224,13 @@ using (ScriptAPI) {
                 }
             }
 
+            // Get the real opcode
+            if (OpcodeEncrypted && mOutbound && EncryptedOpcodes != null && EncryptedOpcodes.ContainsKey(opcode))
+            {
+                opcode = EncryptedOpcodes[opcode].RealOp;
+            }
+
+            definition = Config.Instance.GetDefinition(Build, Locale, mOutbound, opcode);
             return new MaplePacket(pTransmitted, mOutbound, Build, Locale, opcode, definition == null ? "" : definition.Name, packetBuffer, preDecodeIV, postDecodeIV);
         }
 
@@ -271,6 +300,55 @@ using (ScriptAPI) {
         {
             uint overflow = (((uint)pThis) << 8) >> (pCount % 8);
             return (byte)((overflow & 0xFF) | (overflow >> 8));
+        }
+
+        Dictionary<int, EncryptedOpcode> PopulateEncryptedOpcode(byte[] packetBuffer, int bufferSize)
+        {
+            Dictionary<int, EncryptedOpcode>  encryptedOpcodes = new Dictionary<int, EncryptedOpcode>();
+
+            byte[] aData = new byte[bufferSize];
+            Buffer.BlockCopy(packetBuffer, 8, aData, 0, bufferSize);
+
+            byte[] aKey = new byte[24];
+            byte[] aSecretKey = Encoding.ASCII.GetBytes("M@PleStoryMaPLe!");
+            Buffer.BlockCopy(aSecretKey, 0, aKey, 0, aSecretKey.Length);
+            Buffer.BlockCopy(aSecretKey, 0, aKey, 16, 8);
+
+            string sOpcode = TripleDESCipher.Decrypt(aData, aKey);
+            
+            int opcodeBeginIdx = 0; // this should be ClientPacket.UserBegin
+            int opcodeCountIdx = sOpcode.Length; // this should be ClientPacket.Count
+            int loopStep = 4; // this should be 1
+            
+            for (int i = opcodeBeginIdx; i < opcodeCountIdx; i += loopStep)
+            {
+                string enOpString = sOpcode.Substring(i, 4);
+                short realIdx = (short)(i / loopStep);
+                byte[] aRawData = Encoding.ASCII.GetBytes(enOpString);
+                string data = BitConverter.ToString(aRawData).Replace('-', ' ');
+                if (int.TryParse(enOpString, out int encryptOp))
+                {
+                    if (encryptedOpcodes.ContainsKey(encryptOp))
+                    {
+                        Console.WriteLine("Detected duplicate opcode 0x{0:X}. Break the loop.", encryptOp);
+                        break;
+                    }
+                    else
+                    {
+                        // This is for temporary and need to more handle. We should set default value of 'realOp' as negative value to determine this opcode as decrypted but undefined yet.
+                        ushort realOp = (ushort) (realIdx + 200);
+                        EncryptedOpcode encryptedOpcode = new EncryptedOpcode(encryptOp, aRawData, realIdx, realOp);
+                        encryptedOpcodes.Add(encryptOp, encryptedOpcode);
+                        Console.WriteLine("OpcodeEncryption [{0}] -> 0x{1:X4} | Index:{2}", data, encryptOp, realIdx);
+                    }
+                }
+                else
+                {
+                    //Console.WriteLine("Parse Failed: [{0}] | Index:{1}", data, realIdx);
+                    break;
+                }
+            }
+            return encryptedOpcodes;
         }
     }
 }

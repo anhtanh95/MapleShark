@@ -309,6 +309,7 @@ using (ScriptAPI) {
                 ProcessTCPPacket(pTCPPacket, ref mInboundSequence, mInboundBuffer, mInboundStream, pArrivalTime);
                 return Results.Show;
             }
+            mInboundStream.RecvOpcodeEncryptPacket += MapleStream_RecvOpcodeEncryptPacket;
             if (pTCPPacket.SourcePort == mLocalPort) ProcessTCPPacket(pTCPPacket, ref mOutboundSequence, mOutboundBuffer, mOutboundStream, pArrivalTime);
             else ProcessTCPPacket(pTCPPacket, ref mInboundSequence, mInboundBuffer, mInboundStream, pArrivalTime);
             return Results.Continue;
@@ -952,6 +953,12 @@ using (ScriptAPI) {
         private void AddPacket(MaplePacket packet)
         {
             mPackets.Add(packet);
+        }
+
+        private void MapleStream_RecvOpcodeEncryptPacket(object sender, OpcodeEncryptedEventArgs e)
+        {
+            mOutboundStream.OpcodeEncrypted = e.OpcodeEncrypted;
+            mOutboundStream.EncryptedOpcodes = e.EncryptedOpcodes;
         }
 
     }
